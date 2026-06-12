@@ -27,6 +27,34 @@
 
 body { min-height: 100vh; background: var(--bg); }
 
+@media (max-width: 768px) {
+  .db-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .tabs-bar {
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .sheet-scroll {
+    overflow-x: auto;
+  }
+
+  .sheet-table {
+    min-width: 700px;
+  }
+
+  .db-name {
+    font-size: 20px;
+  }
+
+  .tab {
+    flex-shrink: 0;
+  }
+}
+
 /* ───── HOME ───── */
 .home-page { max-width: 680px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 
