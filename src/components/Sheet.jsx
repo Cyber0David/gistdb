@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo } from 'react';
 
 export default function Sheet({ sheet, isAdmin, onChange }) {
   const [colWidths, setColWidths] = useState({});
+  const [sortConfig, setSortConfig] = useState(null); // { col: ci, dir: 'asc'|'desc' }
+  const [search, setSearch] = useState('');
   const resizing = useRef(null);
 
   function updateCell(ri, ci, val) {
@@ -47,20 +49,80 @@ export default function Sheet({ sheet, isAdmin, onChange }) {
   }
 
   function startResize(e, ci) {
+    e.preventDefault();
     resizing.current = { ci, startX: e.clientX, startW: colWidths[ci] || 140 };
     const onMove = (e) => {
       const diff = e.clientX - resizing.current.startX;
       setColWidths(w => ({ ...w, [resizing.current.ci]: Math.max(60, resizing.current.startW + diff) }));
     };
-    const onUp = () => { resizing.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    const onUp = () => {
+      resizing.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }
 
+  function toggleSort(ci) {
+    setSortConfig(prev => {
+      if (prev?.col === ci) {
+        if (prev.dir === 'asc') return { col: ci, dir: 'desc' };
+        return null;
+      }
+      return { col: ci, dir: 'asc' };
+    });
+  }
+
   const rowLabels = sheet.rowLabels || sheet.rows.map((_, i) => `${i + 1}`);
+
+  // Build indexed rows for sort/filter without mutating original
+  const indexedRows = sheet.rows.map((row, i) => ({ row, label: rowLabels[i], origIdx: i }));
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return indexedRows;
+    const q = search.trim().toLowerCase();
+    return indexedRows.filter(({ row, label }) =>
+      row.some(c => c.toLowerCase().includes(q)) || label.toLowerCase().includes(q)
+    );
+  }, [search, sheet.rows, sheet.rowLabels]);
+
+  const sorted = useMemo(() => {
+    if (!sortConfig) return filtered;
+    return [...filtered].sort((a, b) => {
+      const av = a.row[sortConfig.col] || '';
+      const bv = b.row[sortConfig.col] || '';
+      const an = parseFloat(av), bn = parseFloat(bv);
+      let cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, 'ru');
+      return sortConfig.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [filtered, sortConfig]);
+
+  function sortIcon(ci) {
+    if (sortConfig?.col !== ci) return <span className="sort-icon sort-none">⇅</span>;
+    return <span className="sort-icon sort-active">{sortConfig.dir === 'asc' ? '↑' : '↓'}</span>;
+  }
 
   return (
     <div className="sheet-wrap">
+      <div className="sheet-toolbar">
+        <div className="search-box">
+          <span className="search-icon">🔍</span>
+          <input
+            placeholder="Поиск по таблице..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="search-input"
+          />
+          {search && <button className="search-clear" onClick={() => setSearch('')}>×</button>}
+        </div>
+        {(search || sortConfig) && (
+          <span className="filter-hint">
+            {sorted.length} из {sheet.rows.length} строк
+            {sortConfig && ` · сортировка по «${sheet.cols[sortConfig.col]}»`}
+          </span>
+        )}
+      </div>
       <div className="sheet-scroll">
         <table className="sheet-table">
           <thead>
@@ -73,6 +135,9 @@ export default function Sheet({ sheet, isAdmin, onChange }) {
                       ? <input value={col} onChange={e => updateColName(ci, e.target.value)} className="header-input" />
                       : <span className="header-label">{col}</span>
                     }
+                    <button className="sort-btn" onClick={() => toggleSort(ci)} title="Сортировать">
+                      {sortIcon(ci)}
+                    </button>
                     {isAdmin && (
                       <>
                         <button className="col-del-btn" onClick={() => deleteCol(ci)} title="Удалить колонку">×</button>
@@ -86,21 +151,21 @@ export default function Sheet({ sheet, isAdmin, onChange }) {
             </tr>
           </thead>
           <tbody>
-            {sheet.rows.map((row, ri) => (
-              <tr key={ri}>
+            {sorted.map(({ row, label, origIdx }) => (
+              <tr key={origIdx}>
                 <td className="row-header">
                   <div className="row-header-inner">
                     {isAdmin
-                      ? <input value={rowLabels[ri]} onChange={e => updateRowLabel(ri, e.target.value)} className="row-label-input" />
-                      : <span className="row-label">{rowLabels[ri]}</span>
+                      ? <input value={label} onChange={e => updateRowLabel(origIdx, e.target.value)} className="row-label-input" />
+                      : <span className="row-label">{label}</span>
                     }
-                    {isAdmin && <button className="row-del-btn" onClick={() => deleteRow(ri)} title="Удалить строку">×</button>}
+                    {isAdmin && <button className="row-del-btn" onClick={() => deleteRow(origIdx)} title="Удалить строку">×</button>}
                   </div>
                 </td>
                 {row.map((cell, ci) => (
-                  <td key={ci} className="data-cell">
+                  <td key={ci} className={`data-cell ${search && cell.toLowerCase().includes(search.toLowerCase()) && search ? 'cell-highlight' : ''}`}>
                     {isAdmin
-                      ? <input value={cell} onChange={e => updateCell(ri, ci, e.target.value)} className="cell-input" />
+                      ? <input value={cell} onChange={e => updateCell(origIdx, ci, e.target.value)} className="cell-input" />
                       : <span className="cell-text">{cell}</span>
                     }
                   </td>
@@ -108,7 +173,10 @@ export default function Sheet({ sheet, isAdmin, onChange }) {
                 {isAdmin && <td />}
               </tr>
             ))}
-            {isAdmin && (
+            {sorted.length === 0 && (
+              <tr><td colSpan={sheet.cols.length + 2} className="empty-search">Ничего не найдено</td></tr>
+            )}
+            {isAdmin && !search && (
               <tr>
                 <td className="add-row-td" colSpan={sheet.cols.length + 2}>
                   <button className="add-row-btn" onClick={addRow}>+ Добавить строку</button>
