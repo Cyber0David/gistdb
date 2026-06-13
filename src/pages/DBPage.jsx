@@ -7,6 +7,7 @@ import SheetTabs from '../components/SheetTabs';
 import ExportMenu from '../components/ExportMenu';
 import PasswordModal from '../components/PasswordModal';
 import DBSettings from '../components/DBSettings';
+import MobileMenu from '../components/MobileMenu';
 
 export default function DBPage() {
   const { id } = useParams();
@@ -23,6 +24,7 @@ export default function DBPage() {
   const [editingName, setEditingName] = useState(false);
   const [dbNameVal, setDbNameVal] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const saveTimer = useRef(null);
 
@@ -34,7 +36,6 @@ export default function DBPage() {
         setDb(data);
         setActiveSheetId(data.sheets[0]?.id);
         setDbNameVal(data.name);
-        // Auto-unlock if no password or if admin
         if (!data.password || isAdmin) setUnlocked(true);
       })
       .catch(e => setError(e.message))
@@ -65,13 +66,7 @@ export default function DBPage() {
   }
 
   function addSheet() {
-    const sheet = {
-      id: crypto.randomUUID(),
-      name: `Лист ${db.sheets.length + 1}`,
-      cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'],
-      rows: [['', '', '']],
-      rowLabels: ['1'],
-    };
+    const sheet = { id: crypto.randomUUID(), name: `Лист ${db.sheets.length + 1}`, cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'], rows: [['', '', '']], rowLabels: ['1'] };
     const newDb = { ...db, sheets: [...db.sheets, sheet] };
     setDb(newDb);
     setActiveSheetId(sheet.id);
@@ -118,12 +113,18 @@ export default function DBPage() {
   if (error) return <div className="page-center error-box"><span>⚠ {error}</span><button onClick={() => navigate('/')}>На главную</button></div>;
   if (!db) return null;
 
-  // Password gate for viewers
   if (!unlocked) {
     return <PasswordModal correctPassword={db.password} onUnlock={() => setUnlocked(true)} dbName={db.name} />;
   }
 
   const activeSheet = db.sheets.find(s => s.id === activeSheetId);
+
+  // Items for mobile overflow menu
+  const mobileMenuItems = [
+    { icon: '🔗', label: copied ? '✓ Скопировано!' : 'Поделиться', onClick: copyLink },
+    ...(activeSheet ? [{ icon: '⬇', label: 'Экспорт...', onClick: () => setShowExport(true) }] : []),
+    ...(isAdmin ? ['divider', { icon: '⚙', label: 'Настройки', onClick: () => setShowSettings(true) }] : []),
+  ];
 
   return (
     <div className="db-page">
@@ -135,19 +136,28 @@ export default function DBPage() {
                 onChange={e => setDbNameVal(e.target.value)}
                 onBlur={() => renameDB(dbNameVal)}
                 onKeyDown={e => { if (e.key === 'Enter') renameDB(dbNameVal); if (e.key === 'Escape') setEditingName(false); }} />
-            : <h1 className="db-name" onDoubleClick={isAdmin ? () => setEditingName(true) : undefined}
-                title={isAdmin ? 'Двойной клик — переименовать' : ''}>
+            : <h1 className="db-name" onDoubleClick={isAdmin ? () => setEditingName(true) : undefined}>
                 {db.name}
                 {db.password && <span className="lock-icon" title="Защищено паролем">🔒</span>}
               </h1>
           }
         </div>
-        <div className="db-header-right">
+
+        {/* Desktop buttons */}
+        <div className="db-header-right desktop-only">
           {isAdmin && <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : ''}`}>{saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : ''}</span>}
           {activeSheet && <ExportMenu sheet={activeSheet} dbName={db.name} />}
-          {isAdmin && <button className="btn-secondary" onClick={() => setShowSettings(true)} title="Настройки базы">⚙ Настройки</button>}
+          {isAdmin && <button className="btn-secondary" onClick={() => setShowSettings(true)}>⚙ Настройки</button>}
           <button className="btn-secondary" onClick={copyLink}>{copied ? '✓ Скопировано!' : '🔗 Поделиться'}</button>
           {!isAdmin && <span className="readonly-badge">Просмотр</span>}
+        </div>
+
+        {/* Mobile: save status + overflow menu */}
+        <div className="db-header-right mobile-only">
+          {isAdmin && saving && <span className="save-status saving">Сохр...</span>}
+          {isAdmin && saved && <span className="save-status saved">✓</span>}
+          {!isAdmin && <span className="readonly-badge">Просмотр</span>}
+          <MobileMenu items={mobileMenuItems} />
         </div>
       </header>
 
@@ -168,6 +178,25 @@ export default function DBPage() {
       {showSettings && (
         <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />
       )}
+
+      {/* Mobile export modal */}
+      {showExport && activeSheet && (
+        <MobileExportModal sheet={activeSheet} dbName={db.name} onClose={() => setShowExport(false)} />
+      )}
+    </div>
+  );
+}
+
+function MobileExportModal({ sheet, dbName, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box mobile-export-box">
+        <div className="modal-header">
+          <h2>⬇ Экспорт листа</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <ExportMenu sheet={sheet} dbName={dbName} alwaysOpen />
+      </div>
     </div>
   );
 }
