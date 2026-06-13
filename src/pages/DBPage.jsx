@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGist, updateGist, emptyDB } from '../api/gist';
+import { getGist, updateGist } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
 import Sheet from '../components/Sheet';
 import SheetTabs from '../components/SheetTabs';
+import ExportMenu from '../components/ExportMenu';
+import PasswordModal from '../components/PasswordModal';
+import DBSettings from '../components/DBSettings';
 
 export default function DBPage() {
   const { id } = useParams();
@@ -19,6 +22,8 @@ export default function DBPage() {
   const [copied, setCopied] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [dbNameVal, setDbNameVal] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -29,10 +34,12 @@ export default function DBPage() {
         setDb(data);
         setActiveSheetId(data.sheets[0]?.id);
         setDbNameVal(data.name);
+        // Auto-unlock if no password or if admin
+        if (!data.password || isAdmin) setUnlocked(true);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, isAdmin]);
 
   function triggerSave(newDb) {
     if (!isAdmin || !token) return;
@@ -58,7 +65,13 @@ export default function DBPage() {
   }
 
   function addSheet() {
-    const sheet = { id: crypto.randomUUID(), name: `Лист ${db.sheets.length + 1}`, cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'], rows: [['', '', '']] };
+    const sheet = {
+      id: crypto.randomUUID(),
+      name: `Лист ${db.sheets.length + 1}`,
+      cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'],
+      rows: [['', '', '']],
+      rowLabels: ['1'],
+    };
     const newDb = { ...db, sheets: [...db.sheets, sheet] };
     setDb(newDb);
     setActiveSheetId(sheet.id);
@@ -88,6 +101,13 @@ export default function DBPage() {
     triggerSave(newDb);
   }
 
+  function saveSettings(updates) {
+    const newDb = { ...db, ...updates };
+    setDb(newDb);
+    setShowSettings(false);
+    triggerSave(newDb);
+  }
+
   function copyLink() {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -98,6 +118,11 @@ export default function DBPage() {
   if (error) return <div className="page-center error-box"><span>⚠ {error}</span><button onClick={() => navigate('/')}>На главную</button></div>;
   if (!db) return null;
 
+  // Password gate for viewers
+  if (!unlocked) {
+    return <PasswordModal correctPassword={db.password} onUnlock={() => setUnlocked(true)} dbName={db.name} />;
+  }
+
   const activeSheet = db.sheets.find(s => s.id === activeSheetId);
 
   return (
@@ -106,17 +131,23 @@ export default function DBPage() {
         <div className="db-header-left">
           <button className="back-btn" onClick={() => navigate('/')} title="На главную">←</button>
           {isAdmin && editingName
-            ? <input autoFocus className="db-name-input" value={dbNameVal} onChange={e => setDbNameVal(e.target.value)}
-                onBlur={() => renameDB(dbNameVal)} onKeyDown={e => { if (e.key === 'Enter') renameDB(dbNameVal); if (e.key === 'Escape') setEditingName(false); }} />
-            : <h1 className="db-name" onDoubleClick={isAdmin ? () => setEditingName(true) : undefined} title={isAdmin ? 'Двойной клик — переименовать' : ''}>
+            ? <input autoFocus className="db-name-input" value={dbNameVal}
+                onChange={e => setDbNameVal(e.target.value)}
+                onBlur={() => renameDB(dbNameVal)}
+                onKeyDown={e => { if (e.key === 'Enter') renameDB(dbNameVal); if (e.key === 'Escape') setEditingName(false); }} />
+            : <h1 className="db-name" onDoubleClick={isAdmin ? () => setEditingName(true) : undefined}
+                title={isAdmin ? 'Двойной клик — переименовать' : ''}>
                 {db.name}
+                {db.password && <span className="lock-icon" title="Защищено паролем">🔒</span>}
               </h1>
           }
         </div>
         <div className="db-header-right">
           {isAdmin && <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : ''}`}>{saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : ''}</span>}
+          {activeSheet && <ExportMenu sheet={activeSheet} dbName={db.name} />}
+          {isAdmin && <button className="btn-secondary" onClick={() => setShowSettings(true)} title="Настройки базы">⚙ Настройки</button>}
           <button className="btn-secondary" onClick={copyLink}>{copied ? '✓ Скопировано!' : '🔗 Поделиться'}</button>
-          {!isAdmin && <span className="readonly-badge">Режим просмотра</span>}
+          {!isAdmin && <span className="readonly-badge">Просмотр</span>}
         </div>
       </header>
 
@@ -132,6 +163,10 @@ export default function DBPage() {
 
       {activeSheet && (
         <Sheet sheet={activeSheet} isAdmin={isAdmin} onChange={updateSheet} />
+      )}
+
+      {showSettings && (
+        <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />
       )}
     </div>
   );
