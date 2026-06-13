@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 export default function ImportModal({ onImport, onClose }) {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
-  const [preview, setPreview] = useState(null); // parsed db before confirm
+  const [preview, setPreview] = useState(null);
   const inputRef = useRef(null);
 
   function handleFile(file) {
@@ -31,9 +31,26 @@ export default function ImportModal({ onImport, onClose }) {
     else reader.readAsArrayBuffer(file);
   }
 
+  function cellToString(val) {
+    if (val === null || val === undefined) return '';
+    // XLSX date object (when cellDates: true)
+    if (val instanceof Date) {
+      if (isNaN(val.getTime())) return '';
+      const d = String(val.getDate()).padStart(2, '0');
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const y = val.getFullYear();
+      // If time is non-zero — include it
+      const h = val.getHours(), mi = val.getMinutes(), s = val.getSeconds();
+      if (h || mi || s) {
+        return `${d}.${m}.${y} ${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      }
+      return `${d}.${m}.${y}`;
+    }
+    return String(val);
+  }
+
   function parseJSON(text, filename) {
     const data = JSON.parse(text);
-    // If it's already a GistDB format
     if (data.sheets && Array.isArray(data.sheets)) {
       return {
         name: data.name || baseName(filename),
@@ -47,10 +64,9 @@ export default function ImportModal({ onImport, onClose }) {
         password: '',
       };
     }
-    // Array of objects → single sheet
     if (Array.isArray(data) && data.length > 0) {
       const cols = Object.keys(data[0]);
-      const rows = data.map(obj => cols.map(k => String(obj[k] ?? '')));
+      const rows = data.map(obj => cols.map(k => cellToString(obj[k])));
       const rowLabels = data.map((_, i) => `${i + 1}`);
       return { name: baseName(filename), sheets: [{ id: crypto.randomUUID(), name: 'Лист 1', cols, rows, rowLabels }], password: '' };
     }
@@ -72,7 +88,6 @@ export default function ImportModal({ onImport, onClose }) {
       return result;
     };
     const header = parse(lines[0]);
-    // First col is row label if it looks like one (empty header or numeric)
     const hasRowLabel = header[0] === '' || header[0] === undefined;
     const cols = hasRowLabel ? header.slice(1) : header;
     const rows = []; const rowLabels = [];
@@ -86,17 +101,28 @@ export default function ImportModal({ onImport, onClose }) {
   }
 
   function parseExcel(buffer, filename) {
-    const wb = XLSX.read(buffer, { type: 'array' });
+    // cellDates:true → даты приходят как Date-объекты, не числа
+    // dateNF задаёт формат для sheet_to_json когда raw:false, но мы используем raw:true + cellDates
+    const wb = XLSX.read(buffer, { type: 'array', cellDates: true, cellNF: true });
+
     const sheets = wb.SheetNames.map(sheetName => {
       const ws = wb.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      // raw:false — XLSX форматирует числа/даты сам, но теряет точность у дат без формата
+      // Поэтому берём raw:true + cellDates:true и форматируем сами через cellToString
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+
       if (data.length === 0) return { id: crypto.randomUUID(), name: sheetName, cols: [], rows: [], rowLabels: [] };
-      const header = data[0].map(String);
+
+      const header = data[0].map(cellToString);
       const hasRowLabel = header[0] === '';
       const cols = hasRowLabel ? header.slice(1) : header;
       const rows = []; const rowLabels = [];
+
       for (let i = 1; i < data.length; i++) {
-        const cells = data[i].map(String);
+        const cells = data[i].map(cellToString);
+        // Skip fully empty rows
+        if (cells.every(c => c === '')) continue;
         if (hasRowLabel) { rowLabels.push(cells[0] || `${i}`); rows.push(cells.slice(1)); }
         else { rowLabels.push(`${i}`); rows.push(cells); }
       }
@@ -143,7 +169,7 @@ export default function ImportModal({ onImport, onClose }) {
               <p>Как будет импортировано:</p>
               <ul>
                 <li><b>CSV</b> — один лист, первая строка = заголовки колонок</li>
-                <li><b>Excel</b> — каждый лист файла = отдельный лист базы</li>
+                <li><b>Excel</b> — каждый лист файла = отдельный лист базы, даты сохраняются в формате ДД.ММ.ГГГГ</li>
                 <li><b>JSON</b> — массив объектов или формат GistDB</li>
               </ul>
             </div>
