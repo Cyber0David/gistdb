@@ -353,3 +353,17 @@ html { scrollbar-width: thin; scrollbar-color: var(--border2) var(--bg2); }
   .drop-zone { padding: 1.5rem 1rem; }
   .section-head-right .btn-secondary { flex: 1; }
 }
+
+/* ───── SAVE STATES ───── */
+.save-status.dirty { color: var(--warn); }
+.btn-save-now {
+  height: 36px; padding: 0 14px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent2);
+  font-size: 13px; cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.btn-save-now:hover { background: #2a2460; }
