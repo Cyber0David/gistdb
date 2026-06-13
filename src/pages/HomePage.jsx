@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listGists, createGist, emptyDB } from '../api/gist';
+import { listGists, createGist, deleteGist, emptyDB } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
 
 export default function HomePage() {
@@ -14,6 +14,8 @@ export default function HomePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [openIdInput, setOpenIdInput] = useState('');
   const [tokenError, setTokenError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (isAdmin) loadGists();
@@ -24,9 +26,7 @@ export default function HomePage() {
     try {
       const list = await listGists(token);
       setGists(list);
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) { console.error(e); }
     setLoading(false);
   }
 
@@ -51,10 +51,19 @@ export default function HomePage() {
       const db = emptyDB(newName.trim());
       const id = await createGist(token, db);
       navigate(`/db/${id}`);
-    } catch (e) {
-      alert('Ошибка: ' + e.message);
-    }
+    } catch (e) { alert('Ошибка: ' + e.message); }
     setCreating(false);
+  }
+
+  async function handleDelete(e, id) {
+    e.stopPropagation();
+    if (!confirm('Удалить эту базу данных? Это действие нельзя отменить.')) return;
+    setDeletingId(id);
+    try {
+      await deleteGist(token, id);
+      setGists(g => g.filter(x => x.id !== id));
+    } catch (e) { alert('Ошибка: ' + e.message); }
+    setDeletingId(null);
   }
 
   function openById() {
@@ -65,6 +74,10 @@ export default function HomePage() {
     else alert('Неверный ID или ссылка');
   }
 
+  const filteredGists = gists.filter(g =>
+    (g.description || '').toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <div className="home-page">
       <div className="home-hero">
@@ -74,23 +87,26 @@ export default function HomePage() {
       </div>
 
       <div className="home-content">
-        {/* OPEN BY LINK */}
         <section className="home-section">
           <h2>Открыть по ссылке или ID</h2>
           <div className="input-row">
-            <input placeholder="https://yoursite.com/db/abc123  или  abc123" value={openIdInput} onChange={e => setOpenIdInput(e.target.value)}
+            <input placeholder="https://gistdb.vercel.app/db/abc123  или  abc123"
+              value={openIdInput} onChange={e => setOpenIdInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && openById()} />
             <button className="btn-primary" onClick={openById}>Открыть</button>
           </div>
         </section>
 
-        {/* ADMIN LOGIN */}
         {!isAdmin && (
           <section className="home-section">
             <h2>Войти как администратор</h2>
-            <p className="section-hint">Нужен GitHub Personal Access Token с правами <code>gist</code>. <a href="https://github.com/settings/tokens/new?scopes=gist&description=GistDB" target="_blank" rel="noreferrer">Создать токен →</a></p>
+            <p className="section-hint">
+              Нужен GitHub Personal Access Token с правами <code>gist</code>.{' '}
+              <a href="https://github.com/settings/tokens/new?scopes=gist&description=GistDB" target="_blank" rel="noreferrer">Создать токен →</a>
+            </p>
             <div className="input-row">
-              <input type="password" placeholder="ghp_xxxxxxxxxxxx" value={tokenInput} onChange={e => setTokenInput(e.target.value)}
+              <input type="password" placeholder="ghp_xxxxxxxxxxxx"
+                value={tokenInput} onChange={e => setTokenInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && loginWithToken()} />
               <button className="btn-primary" onClick={loginWithToken}>Войти</button>
             </div>
@@ -98,7 +114,6 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* ADMIN PANEL */}
         {isAdmin && (
           <section className="home-section admin-section">
             <div className="section-head">
@@ -111,23 +126,41 @@ export default function HomePage() {
 
             {showCreate && (
               <div className="create-box">
-                <input autoFocus placeholder="Название новой базы" value={newName} onChange={e => setNewName(e.target.value)}
+                <input autoFocus placeholder="Название новой базы" value={newName}
+                  onChange={e => setNewName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleCreate()} />
-                <button className="btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Создаём...' : 'Создать'}</button>
+                <button className="btn-primary" onClick={handleCreate} disabled={creating}>
+                  {creating ? 'Создаём...' : 'Создать'}
+                </button>
                 <button className="btn-ghost" onClick={() => setShowCreate(false)}>Отмена</button>
+              </div>
+            )}
+
+            {gists.length > 3 && (
+              <div className="gist-search-wrap">
+                <input className="gist-search" placeholder="Поиск по базам..." value={search}
+                  onChange={e => setSearch(e.target.value)} />
               </div>
             )}
 
             {loading
               ? <div className="gist-loading">Загружаем список...</div>
-              : gists.length === 0
-                ? <div className="gist-empty">Нет баз данных. Создайте первую!</div>
+              : filteredGists.length === 0
+                ? <div className="gist-empty">{search ? 'Ничего не найдено' : 'Нет баз данных. Создайте первую!'}</div>
                 : <div className="gist-list">
-                    {gists.map(g => (
+                    {filteredGists.map(g => (
                       <div key={g.id} className="gist-card" onClick={() => navigate(`/db/${g.id}`)}>
-                        <div className="gist-card-name">{g.description?.replace('GistDB: ', '') || 'Без названия'}</div>
-                        <div className="gist-card-meta">Изменено: {new Date(g.updatedAt).toLocaleString('ru')}</div>
-                        <div className="gist-card-id">{g.id.slice(0, 16)}…</div>
+                        <div className="gist-card-body">
+                          <div className="gist-card-name">{g.description?.replace('GistDB: ', '') || 'Без названия'}</div>
+                          <div className="gist-card-meta">Изменено: {new Date(g.updatedAt).toLocaleString('ru')}</div>
+                          <div className="gist-card-id">{g.id.slice(0, 20)}…</div>
+                        </div>
+                        <button
+                          className="gist-delete-btn"
+                          onClick={e => handleDelete(e, g.id)}
+                          disabled={deletingId === g.id}
+                          title="Удалить базу"
+                        >{deletingId === g.id ? '...' : '🗑'}</button>
                       </div>
                     ))}
                   </div>
