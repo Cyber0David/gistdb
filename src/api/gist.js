@@ -6,10 +6,6 @@ function headers(token) {
   return h;
 }
 
-function serialize(db) {
-  return JSON.stringify({ files: { 'db.json': { content: JSON.stringify(db, null, 2) } } });
-}
-
 export async function getGist(id) {
   const res = await fetch(`${BASE}/gists/${id}`, { headers: headers() });
   if (!res.ok) throw new Error(`Gist not found (${res.status})`);
@@ -38,7 +34,7 @@ export async function updateGist(token, id, db) {
   const res = await fetch(`${BASE}/gists/${id}`, {
     method: 'PATCH',
     headers: headers(token),
-    body: serialize(db),
+    body: JSON.stringify({ files: { 'db.json': { content: JSON.stringify(db, null, 2) } } }),
   });
   if (!res.ok) throw new Error(`Failed to save (${res.status})`);
   return true;
@@ -55,15 +51,23 @@ export async function listGists(token) {
   }));
 }
 
+export async function deleteGist(token, id) {
+  const res = await fetch(`${BASE}/gists/${id}`, { method: 'DELETE', headers: headers(token) });
+  if (!res.ok) throw new Error(`Failed to delete (${res.status})`);
+  return true;
+}
+
 export function emptyDB(name = 'Новая база') {
   return {
     name,
+    password: '',
     sheets: [
       {
         id: crypto.randomUUID(),
         name: 'Лист 1',
         cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'],
         rows: [['', '', ''], ['', '', '']],
+        rowLabels: ['1', '2'],
       },
     ],
   };
