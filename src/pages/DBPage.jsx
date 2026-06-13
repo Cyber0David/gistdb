@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getGist, updateGist } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
@@ -20,13 +20,17 @@ export default function DBPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [dirty, setDirty] = useState(false); // unsaved changes
   const [copied, setCopied] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [dbNameVal, setDbNameVal] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
+
   const saveTimer = useRef(null);
+  const lastSavedJson = useRef('');
+  const dbRef = useRef(null);
 
   useEffect(() => {
     if (!id) return;
@@ -34,6 +38,8 @@ export default function DBPage() {
     getGist(id)
       .then(data => {
         setDb(data);
+        dbRef.current = data;
+        lastSavedJson.current = JSON.stringify(data);
         setActiveSheetId(data.sheets[0]?.id);
         setDbNameVal(data.name);
         if (!data.password || isAdmin) setUnlocked(true);
@@ -42,65 +48,94 @@ export default function DBPage() {
       .finally(() => setLoading(false));
   }, [id, isAdmin]);
 
-  function triggerSave(newDb) {
+  // Ctrl+S / Cmd+S
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty) saveNow();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dirty]);
+
+  async function saveNow(overrideDb) {
+    const target = overrideDb || dbRef.current;
+    if (!target || !isAdmin || !token) return;
+    const json = JSON.stringify(target);
+    if (json === lastSavedJson.current) return; // nothing changed
+    clearTimeout(saveTimer.current);
+    setSaving(true);
+    setSaved(false);
+    try {
+      await updateGist(token, id, target);
+      lastSavedJson.current = json;
+      setDirty(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      alert('Ошибка сохранения: ' + e.message);
+    }
+    setSaving(false);
+  }
+
+  function scheduleSave(newDb) {
     if (!isAdmin || !token) return;
     clearTimeout(saveTimer.current);
+    setDirty(true);
     setSaved(false);
-    saveTimer.current = setTimeout(async () => {
-      setSaving(true);
-      try {
-        await updateGist(token, id, newDb);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
-      } catch (e) {
-        alert('Ошибка сохранения: ' + e.message);
-      }
-      setSaving(false);
-    }, 800);
+    saveTimer.current = setTimeout(() => saveNow(newDb), 5000);
   }
 
   function updateSheet(updatedSheet) {
-    const newDb = { ...db, sheets: db.sheets.map(s => s.id === updatedSheet.id ? updatedSheet : s) };
+    const newDb = { ...dbRef.current, sheets: dbRef.current.sheets.map(s => s.id === updatedSheet.id ? updatedSheet : s) };
     setDb(newDb);
-    triggerSave(newDb);
+    dbRef.current = newDb;
+    scheduleSave(newDb);
   }
 
   function addSheet() {
-    const sheet = { id: crypto.randomUUID(), name: `Лист ${db.sheets.length + 1}`, cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'], rows: [['', '', '']], rowLabels: ['1'] };
-    const newDb = { ...db, sheets: [...db.sheets, sheet] };
+    const sheet = { id: crypto.randomUUID(), name: `Лист ${dbRef.current.sheets.length + 1}`, cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'], rows: [['', '', '']], rowLabels: ['1'] };
+    const newDb = { ...dbRef.current, sheets: [...dbRef.current.sheets, sheet] };
     setDb(newDb);
+    dbRef.current = newDb;
     setActiveSheetId(sheet.id);
-    triggerSave(newDb);
+    scheduleSave(newDb);
   }
 
   function renameSheet(sheetId, name) {
-    const newDb = { ...db, sheets: db.sheets.map(s => s.id === sheetId ? { ...s, name } : s) };
+    const newDb = { ...dbRef.current, sheets: dbRef.current.sheets.map(s => s.id === sheetId ? { ...s, name } : s) };
     setDb(newDb);
-    triggerSave(newDb);
+    dbRef.current = newDb;
+    scheduleSave(newDb);
   }
 
   function deleteSheet(sheetId) {
-    if (db.sheets.length <= 1) return;
-    const sheets = db.sheets.filter(s => s.id !== sheetId);
-    const newDb = { ...db, sheets };
+    if (dbRef.current.sheets.length <= 1) return;
+    const sheets = dbRef.current.sheets.filter(s => s.id !== sheetId);
+    const newDb = { ...dbRef.current, sheets };
     setDb(newDb);
+    dbRef.current = newDb;
     if (activeSheetId === sheetId) setActiveSheetId(sheets[0].id);
-    triggerSave(newDb);
+    scheduleSave(newDb);
   }
 
   function renameDB(name) {
-    const newDb = { ...db, name };
+    const newDb = { ...dbRef.current, name };
     setDb(newDb);
+    dbRef.current = newDb;
     setDbNameVal(name);
     setEditingName(false);
-    triggerSave(newDb);
+    scheduleSave(newDb);
   }
 
   function saveSettings(updates) {
-    const newDb = { ...db, ...updates };
+    const newDb = { ...dbRef.current, ...updates };
     setDb(newDb);
+    dbRef.current = newDb;
     setShowSettings(false);
-    triggerSave(newDb);
+    saveNow(newDb);
   }
 
   function copyLink() {
@@ -119,11 +154,14 @@ export default function DBPage() {
 
   const activeSheet = db.sheets.find(s => s.id === activeSheetId);
 
-  // Items for mobile overflow menu
   const mobileMenuItems = [
     { icon: '🔗', label: copied ? '✓ Скопировано!' : 'Поделиться', onClick: copyLink },
     ...(activeSheet ? [{ icon: '⬇', label: 'Экспорт...', onClick: () => setShowExport(true) }] : []),
-    ...(isAdmin ? ['divider', { icon: '⚙', label: 'Настройки', onClick: () => setShowSettings(true) }] : []),
+    ...(isAdmin ? [
+      'divider',
+      { icon: '⚙', label: 'Настройки', onClick: () => setShowSettings(true) },
+      ...(dirty ? [{ icon: '💾', label: 'Сохранить сейчас', onClick: () => saveNow() }] : []),
+    ] : []),
   ];
 
   return (
@@ -143,19 +181,27 @@ export default function DBPage() {
           }
         </div>
 
-        {/* Desktop buttons */}
+        {/* Desktop */}
         <div className="db-header-right desktop-only">
-          {isAdmin && <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : ''}`}>{saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : ''}</span>}
+          {isAdmin && (
+            <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : dirty ? 'dirty' : ''}`}>
+              {saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : dirty ? '● Есть изменения' : ''}
+            </span>
+          )}
+          {isAdmin && dirty && !saving && (
+            <button className="btn-save-now" onClick={() => saveNow()} title="Сохранить (Ctrl+S)">💾 Сохранить</button>
+          )}
           {activeSheet && <ExportMenu sheet={activeSheet} dbName={db.name} />}
           {isAdmin && <button className="btn-secondary" onClick={() => setShowSettings(true)}>⚙ Настройки</button>}
           <button className="btn-secondary" onClick={copyLink}>{copied ? '✓ Скопировано!' : '🔗 Поделиться'}</button>
           {!isAdmin && <span className="readonly-badge">Просмотр</span>}
         </div>
 
-        {/* Mobile: save status + overflow menu */}
+        {/* Mobile */}
         <div className="db-header-right mobile-only">
           {isAdmin && saving && <span className="save-status saving">Сохр...</span>}
           {isAdmin && saved && <span className="save-status saved">✓</span>}
+          {isAdmin && dirty && !saving && <span className="save-status dirty">●</span>}
           {!isAdmin && <span className="readonly-badge">Просмотр</span>}
           <MobileMenu items={mobileMenuItems} />
         </div>
@@ -179,7 +225,6 @@ export default function DBPage() {
         <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />
       )}
 
-      {/* Mobile export modal */}
       {showExport && activeSheet && (
         <MobileExportModal sheet={activeSheet} dbName={db.name} onClose={() => setShowExport(false)} />
       )}
