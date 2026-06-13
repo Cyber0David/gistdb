@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listGists, createGist, deleteGist, emptyDB } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
+import ImportModal from '../components/ImportModal';
 
 export default function HomePage() {
   const { token, setToken, isAdmin } = useAuth();
@@ -12,21 +13,17 @@ export default function HomePage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [openIdInput, setOpenIdInput] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [deletingId, setDeletingId] = useState(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (isAdmin) loadGists();
-  }, [isAdmin]);
+  useEffect(() => { if (isAdmin) loadGists(); }, [isAdmin]);
 
   async function loadGists() {
     setLoading(true);
-    try {
-      const list = await listGists(token);
-      setGists(list);
-    } catch (e) { console.error(e); }
+    try { setGists(await listGists(token)); } catch (e) { console.error(e); }
     setLoading(false);
   }
 
@@ -39,19 +36,26 @@ export default function HomePage() {
       });
       if (!res.ok) { setTokenError('Неверный токен. Проверь права: Gists (read+write).'); return; }
       setToken(tokenInput.trim());
-    } catch {
-      setTokenError('Ошибка подключения к GitHub.');
-    }
+    } catch { setTokenError('Ошибка подключения к GitHub.'); }
   }
 
   async function handleCreate() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const db = emptyDB(newName.trim());
-      const id = await createGist(token, db);
+      const id = await createGist(token, emptyDB(newName.trim()));
       navigate(`/db/${id}`);
     } catch (e) { alert('Ошибка: ' + e.message); }
+    setCreating(false);
+  }
+
+  async function handleImport(db) {
+    setShowImport(false);
+    setCreating(true);
+    try {
+      const id = await createGist(token, db);
+      navigate(`/db/${id}`);
+    } catch (e) { alert('Ошибка импорта: ' + e.message); }
     setCreating(false);
   }
 
@@ -59,10 +63,8 @@ export default function HomePage() {
     e.stopPropagation();
     if (!confirm('Удалить эту базу данных? Это действие нельзя отменить.')) return;
     setDeletingId(id);
-    try {
-      await deleteGist(token, id);
-      setGists(g => g.filter(x => x.id !== id));
-    } catch (e) { alert('Ошибка: ' + e.message); }
+    try { await deleteGist(token, id); setGists(g => g.filter(x => x.id !== id)); }
+    catch (e) { alert('Ошибка: ' + e.message); }
     setDeletingId(null);
   }
 
@@ -120,6 +122,7 @@ export default function HomePage() {
               <h2>Мои базы данных</h2>
               <div className="section-head-right">
                 <button className="btn-primary" onClick={() => setShowCreate(v => !v)}>+ Создать</button>
+                <button className="btn-secondary" onClick={() => setShowImport(true)}>⬆ Импорт</button>
                 <button className="btn-ghost" onClick={() => { setToken(''); setGists([]); }}>Выйти</button>
               </div>
             </div>
@@ -138,8 +141,8 @@ export default function HomePage() {
 
             {gists.length > 3 && (
               <div className="gist-search-wrap">
-                <input className="gist-search" placeholder="Поиск по базам..." value={search}
-                  onChange={e => setSearch(e.target.value)} />
+                <input className="gist-search" placeholder="Поиск по базам..."
+                  value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             )}
 
@@ -155,12 +158,10 @@ export default function HomePage() {
                           <div className="gist-card-meta">Изменено: {new Date(g.updatedAt).toLocaleString('ru')}</div>
                           <div className="gist-card-id">{g.id.slice(0, 20)}…</div>
                         </div>
-                        <button
-                          className="gist-delete-btn"
-                          onClick={e => handleDelete(e, g.id)}
-                          disabled={deletingId === g.id}
-                          title="Удалить базу"
-                        >{deletingId === g.id ? '...' : '🗑'}</button>
+                        <button className="gist-delete-btn" onClick={e => handleDelete(e, g.id)}
+                          disabled={deletingId === g.id} title="Удалить базу">
+                          {deletingId === g.id ? '...' : '🗑'}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -168,6 +169,8 @@ export default function HomePage() {
           </section>
         )}
       </div>
+
+      {showImport && <ImportModal onImport={handleImport} onClose={() => setShowImport(false)} />}
     </div>
   );
 }
