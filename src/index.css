@@ -367,3 +367,48 @@ html { scrollbar-width: thin; scrollbar-color: var(--border2) var(--bg2); }
   white-space: nowrap;
 }
 .btn-save-now:hover { background: #2a2460; }
+
+/* ───── PASSWORD SETTINGS ───── */
+.current-pass-status { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text2); margin-bottom: 10px; }
+.pass-hint { font-size: 12px; color: var(--text2); margin-top: 6px; }
+
+/* ───── CONFLICT BANNER ───── */
+.conflict-banner {
+  background: #2a1a00;
+  border-bottom: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 13px;
+  padding: 8px 1rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.conflict-banner button {
+  background: var(--bg3);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.conflict-banner button:last-child {
+  background: transparent;
+  border: none;
+  margin-left: auto;
+  font-size: 16px;
+}
+
+/* ───── PASSWORD SETTINGS ───── */
+.pass-clear-warning {
+  font-size: 12px;
+  color: var(--error);
+  margin-top: 6px;
+}
+.pass-security-note {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 6px;
+}
