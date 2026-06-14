@@ -412,3 +412,54 @@ html { scrollbar-width: thin; scrollbar-color: var(--border2) var(--bg2); }
   color: var(--text2);
   margin-top: 6px;
 }
+
+/* ───── CELL SELECTION ───── */
+.cell-selected { background: #1e1a3a !important; }
+.cell-selected .cell-input { background: transparent; }
+.data-cell { user-select: none; }
+.data-cell .cell-input { user-select: text; }
+
+/* ───── STATS BAR ───── */
+.stats-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 1rem; border-top: 1px solid var(--border);
+  background: var(--bg2); font-size: 12px; color: var(--text2);
+  flex-shrink: 0;
+}
+.stats-bar b { color: var(--text); }
+.stats-sep { color: var(--border2); }
+.stats-close { margin-left: auto; background: transparent; border: none; color: var(--text2); cursor: pointer; font-size: 14px; }
+.stats-close:hover { color: var(--text); }
+
+/* ───── UNDO/REDO BUTTONS ───── */
+.btn-icon {
+  width: 32px; height: 32px; background: transparent;
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text2); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover { color: var(--text); border-color: var(--border2); }
+
+/* ───── SHEET TABS DRAG ───── */
+.tab-drag-over { border-color: var(--accent) !important; background: var(--accent-bg) !important; }
+.tab[draggable=true] { cursor: grab; }
+.tab[draggable=true]:active { cursor: grabbing; }
+
+/* ───── CONTEXT MENU ───── */
+.context-menu {
+  position: fixed; z-index: 300;
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 6px; min-width: 180px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.context-menu button {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 9px 12px; background: transparent;
+  border: none; border-radius: 6px; color: var(--text);
+  font-size: 13px; cursor: pointer; text-align: left;
+  transition: background 0.1s;
+}
+.context-menu button:hover { background: var(--bg4); }
+.context-menu .context-danger { color: var(--error); }
+.context-menu .context-danger:hover { background: #2a1010; }
