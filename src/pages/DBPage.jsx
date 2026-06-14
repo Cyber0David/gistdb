@@ -100,7 +100,7 @@ export default function DBPage() {
     const target = overrideDb || dbRef.current;
     if (!target || !isAdmin || !token) return;
     const json = JSON.stringify(target);
-    if (json === lastSavedJson.current) return;
+    if (json === lastSavedJson.current && !overrideDb) return;
     clearTimeout(saveTimer.current);
     setSaving(true); setSaved(false);
     try {
@@ -173,7 +173,7 @@ export default function DBPage() {
       {conflictWarning && (
         <div className="conflict-banner">
           ⚠ Другая вкладка сохранила эту базу. Твои изменения могут перезаписать их.
-          <button onClick={() => saveNow()}>Сохранить мои</button>
+          <button onClick={() => saveNow(dbRef.current)}>Сохранить мои</button>
           <button onClick={() => { setConflictWarning(false); window.location.reload(); }}>Загрузить свежие</button>
           <button onClick={() => setConflictWarning(false)}>✕</button>
         </div>
