@@ -1,13 +1,31 @@
 import { useState } from 'react';
+import { hashPassword, isHashed } from '../api/password';
 
 export default function DBSettings({ db, onSave, onClose }) {
   const [name, setName] = useState(db.name);
-  const [password, setPassword] = useState(db.password || '');
+  const [newPassword, setNewPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const hasExistingPassword = !!db.password;
 
-  function save() {
+  async function save() {
     if (!name.trim()) return;
-    onSave({ name: name.trim(), password });
+    setSaving(true);
+    let passwordHash = db.password; // keep existing hash by default
+
+    if (newPassword === '') {
+      // Field left empty = keep existing password unchanged
+      passwordHash = db.password;
+    } else if (newPassword === '__CLEAR__') {
+      // User clicked "Remove password"
+      passwordHash = '';
+    } else {
+      // New password entered — hash it
+      passwordHash = await hashPassword(newPassword);
+    }
+
+    onSave({ name: name.trim(), password: passwordHash });
+    setSaving(false);
   }
 
   return (
@@ -26,26 +44,32 @@ export default function DBSettings({ db, onSave, onClose }) {
 
         <div className="settings-field">
           <label>
-            Пароль для просмотра
-            <span className="field-hint">Оставь пустым — доступ без пароля</span>
+            {hasExistingPassword ? 'Изменить пароль' : 'Установить пароль'}
+            <span className="field-hint">
+              {hasExistingPassword ? 'оставь пустым — пароль не изменится' : 'оставь пустым — без пароля'}
+            </span>
           </label>
           <div className="pass-row">
             <input
               type={showPass ? 'text' : 'password'}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Без пароля"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder={hasExistingPassword ? '••••••••' : 'Новый пароль...'}
               className="settings-input"
             />
             <button className="show-pass-btn" onClick={() => setShowPass(v => !v)}>
               {showPass ? '🙈' : '👁'}
             </button>
           </div>
-          {password && (
-            <button className="clear-pass-btn" onClick={() => setPassword('')}>
+          {hasExistingPassword && (
+            <button className="clear-pass-btn" onClick={() => { setNewPassword('__CLEAR__'); }}>
               × Убрать пароль
             </button>
           )}
+          {newPassword === '__CLEAR__' && (
+            <p className="pass-clear-warning">⚠ Пароль будет удалён при сохранении</p>
+          )}
+          <p className="pass-security-note">🔒 Пароль хранится в зашифрованном виде (SHA-256)</p>
         </div>
 
         <div className="settings-field">
@@ -57,7 +81,9 @@ export default function DBSettings({ db, onSave, onClose }) {
         </div>
 
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save}>Сохранить</button>
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Сохраняем...' : 'Сохранить'}
+          </button>
           <button className="btn-ghost" onClick={onClose}>Отмена</button>
         </div>
       </div>
