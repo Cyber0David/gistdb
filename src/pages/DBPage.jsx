@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getGist, updateGist } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
@@ -20,17 +20,19 @@ export default function DBPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [dirty, setDirty] = useState(false); // unsaved changes
+  const [dirty, setDirty] = useState(false);
   const [copied, setCopied] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [dbNameVal, setDbNameVal] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
+  const [conflictWarning, setConflictWarning] = useState(false);
 
   const saveTimer = useRef(null);
   const lastSavedJson = useRef('');
   const dbRef = useRef(null);
+  const SESSION_KEY = `gistdb_unlocked_${id}`;
 
   useEffect(() => {
     if (!id) return;
@@ -42,11 +44,34 @@ export default function DBPage() {
         lastSavedJson.current = JSON.stringify(data);
         setActiveSheetId(data.sheets[0]?.id);
         setDbNameVal(data.name);
-        if (!data.password || isAdmin) setUnlocked(true);
+        const alreadyUnlocked = sessionStorage.getItem(SESSION_KEY) === '1';
+        if (!data.password || isAdmin || alreadyUnlocked) setUnlocked(true);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [id, isAdmin]);
+
+  // Warn before closing with unsaved changes
+  useEffect(() => {
+    function onBeforeUnload(e) {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  // Detect another tab editing the same DB
+  useEffect(() => {
+    if (!isAdmin) return;
+    const channel = new BroadcastChannel(`gistdb_${id}`);
+    channel.onmessage = (e) => {
+      if (e.data === 'saved' && dirty) setConflictWarning(true);
+    };
+    return () => channel.close();
+  }, [id, isAdmin, dirty]);
 
   // Ctrl+S / Cmd+S
   useEffect(() => {
@@ -60,11 +85,16 @@ export default function DBPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [dirty]);
 
+  function handleUnlock() {
+    sessionStorage.setItem(SESSION_KEY, '1');
+    setUnlocked(true);
+  }
+
   async function saveNow(overrideDb) {
     const target = overrideDb || dbRef.current;
     if (!target || !isAdmin || !token) return;
     const json = JSON.stringify(target);
-    if (json === lastSavedJson.current) return; // nothing changed
+    if (json === lastSavedJson.current) return;
     clearTimeout(saveTimer.current);
     setSaving(true);
     setSaved(false);
@@ -72,7 +102,10 @@ export default function DBPage() {
       await updateGist(token, id, target);
       lastSavedJson.current = json;
       setDirty(false);
+      setConflictWarning(false);
       setSaved(true);
+      // Notify other tabs
+      try { new BroadcastChannel(`gistdb_${id}`).postMessage('saved'); } catch {}
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       alert('Ошибка сохранения: ' + e.message);
@@ -90,58 +123,42 @@ export default function DBPage() {
 
   function updateSheet(updatedSheet) {
     const newDb = { ...dbRef.current, sheets: dbRef.current.sheets.map(s => s.id === updatedSheet.id ? updatedSheet : s) };
-    setDb(newDb);
-    dbRef.current = newDb;
-    scheduleSave(newDb);
+    setDb(newDb); dbRef.current = newDb; scheduleSave(newDb);
   }
 
   function addSheet() {
     const sheet = { id: crypto.randomUUID(), name: `Лист ${dbRef.current.sheets.length + 1}`, cols: ['Колонка 1', 'Колонка 2', 'Колонка 3'], rows: [['', '', '']], rowLabels: ['1'] };
     const newDb = { ...dbRef.current, sheets: [...dbRef.current.sheets, sheet] };
-    setDb(newDb);
-    dbRef.current = newDb;
-    setActiveSheetId(sheet.id);
-    scheduleSave(newDb);
+    setDb(newDb); dbRef.current = newDb; setActiveSheetId(sheet.id); scheduleSave(newDb);
   }
 
   function renameSheet(sheetId, name) {
     const newDb = { ...dbRef.current, sheets: dbRef.current.sheets.map(s => s.id === sheetId ? { ...s, name } : s) };
-    setDb(newDb);
-    dbRef.current = newDb;
-    scheduleSave(newDb);
+    setDb(newDb); dbRef.current = newDb; scheduleSave(newDb);
   }
 
   function deleteSheet(sheetId) {
     if (dbRef.current.sheets.length <= 1) return;
     const sheets = dbRef.current.sheets.filter(s => s.id !== sheetId);
     const newDb = { ...dbRef.current, sheets };
-    setDb(newDb);
-    dbRef.current = newDb;
+    setDb(newDb); dbRef.current = newDb;
     if (activeSheetId === sheetId) setActiveSheetId(sheets[0].id);
     scheduleSave(newDb);
   }
 
   function renameDB(name) {
     const newDb = { ...dbRef.current, name };
-    setDb(newDb);
-    dbRef.current = newDb;
-    setDbNameVal(name);
-    setEditingName(false);
-    scheduleSave(newDb);
+    setDb(newDb); dbRef.current = newDb; setDbNameVal(name); setEditingName(false); scheduleSave(newDb);
   }
 
   function saveSettings(updates) {
     const newDb = { ...dbRef.current, ...updates };
-    setDb(newDb);
-    dbRef.current = newDb;
-    setShowSettings(false);
-    saveNow(newDb);
+    setDb(newDb); dbRef.current = newDb; setShowSettings(false); saveNow(newDb);
   }
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
 
   if (loading) return <div className="page-center"><div className="spinner" /><span>Загружаем базу...</span></div>;
@@ -149,7 +166,7 @@ export default function DBPage() {
   if (!db) return null;
 
   if (!unlocked) {
-    return <PasswordModal correctPassword={db.password} onUnlock={() => setUnlocked(true)} dbName={db.name} />;
+    return <PasswordModal correctPassword={db.password} onUnlock={handleUnlock} dbName={db.name} />;
   }
 
   const activeSheet = db.sheets.find(s => s.id === activeSheetId);
@@ -166,6 +183,16 @@ export default function DBPage() {
 
   return (
     <div className="db-page">
+      {/* Conflict warning banner */}
+      {conflictWarning && (
+        <div className="conflict-banner">
+          ⚠ Другая вкладка сохранила эту базу. Твои изменения могут перезаписать их.
+          <button onClick={() => saveNow()}>Сохранить мои</button>
+          <button onClick={() => { setConflictWarning(false); window.location.reload(); }}>Загрузить свежие</button>
+          <button onClick={() => setConflictWarning(false)}>✕</button>
+        </div>
+      )}
+
       <header className="db-header">
         <div className="db-header-left">
           <button className="back-btn" onClick={() => navigate('/')} title="На главную">←</button>
@@ -181,7 +208,6 @@ export default function DBPage() {
           }
         </div>
 
-        {/* Desktop */}
         <div className="db-header-right desktop-only">
           {isAdmin && (
             <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : dirty ? 'dirty' : ''}`}>
@@ -197,7 +223,6 @@ export default function DBPage() {
           {!isAdmin && <span className="readonly-badge">Просмотр</span>}
         </div>
 
-        {/* Mobile */}
         <div className="db-header-right mobile-only">
           {isAdmin && saving && <span className="save-status saving">Сохр...</span>}
           {isAdmin && saved && <span className="save-status saved">✓</span>}
@@ -207,41 +232,24 @@ export default function DBPage() {
         </div>
       </header>
 
-      <SheetTabs
-        sheets={db.sheets}
-        activeId={activeSheetId}
-        isAdmin={isAdmin}
-        onSelect={setActiveSheetId}
-        onAdd={addSheet}
-        onRename={renameSheet}
-        onDelete={deleteSheet}
-      />
+      <SheetTabs sheets={db.sheets} activeId={activeSheetId} isAdmin={isAdmin}
+        onSelect={setActiveSheetId} onAdd={addSheet} onRename={renameSheet} onDelete={deleteSheet} />
 
-      {activeSheet && (
-        <Sheet sheet={activeSheet} isAdmin={isAdmin} onChange={updateSheet} />
-      )}
+      {activeSheet && <Sheet sheet={activeSheet} isAdmin={isAdmin} onChange={updateSheet} />}
 
-      {showSettings && (
-        <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />
-      )}
+      {showSettings && <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />}
 
       {showExport && activeSheet && (
-        <MobileExportModal sheet={activeSheet} dbName={db.name} onClose={() => setShowExport(false)} />
-      )}
-    </div>
-  );
-}
-
-function MobileExportModal({ sheet, dbName, onClose }) {
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box mobile-export-box">
-        <div className="modal-header">
-          <h2>⬇ Экспорт листа</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowExport(false)}>
+          <div className="modal-box mobile-export-box">
+            <div className="modal-header">
+              <h2>⬇ Экспорт листа</h2>
+              <button className="modal-close" onClick={() => setShowExport(false)}>×</button>
+            </div>
+            <ExportMenu sheet={activeSheet} dbName={db.name} alwaysOpen />
+          </div>
         </div>
-        <ExportMenu sheet={sheet} dbName={dbName} alwaysOpen />
-      </div>
+      )}
     </div>
   );
 }
