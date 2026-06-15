@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGist, updateGist } from '../api/gist';
+import { getGist, updateGist, getRateLimit } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
 import { useHistory } from '../hooks/useHistory';
 import Sheet from '../components/Sheet';
@@ -12,7 +12,7 @@ import MobileMenu from '../components/MobileMenu';
 
 export default function DBPage() {
   const { id } = useParams();
-  const { token, isAdmin } = useAuth();
+  const { activeGitHubToken: token, isAdmin, isUser, encryptPassword } = useAuth();
   const navigate = useNavigate();
 
   const { state: db, set: setDb, undo, redo, canUndo, canRedo } = useHistory(null);
@@ -38,7 +38,7 @@ export default function DBPage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    getGist(id)
+    getGist(id, token, encryptPassword)
       .then(data => {
         setDb(data);
         dbRef.current = data;
@@ -100,11 +100,11 @@ export default function DBPage() {
     const target = overrideDb || dbRef.current;
     if (!target || !isAdmin || !token) return;
     const json = JSON.stringify(target);
-    if (json === lastSavedJson.current && !overrideDb) return;
+    if (json === lastSavedJson.current) return;
     clearTimeout(saveTimer.current);
     setSaving(true); setSaved(false);
     try {
-      await updateGist(token, id, target);
+      await updateGist(token, id, target, encryptPassword);
       lastSavedJson.current = json;
       setDirty(false); setConflictWarning(false); setSaved(true);
       try { new BroadcastChannel(`gistdb_${id}`).postMessage('saved'); } catch {}
@@ -170,10 +170,11 @@ export default function DBPage() {
 
   return (
     <div className="db-page">
+      <RateLimitBanner threshold={null} />
       {conflictWarning && (
         <div className="conflict-banner">
           ⚠ Другая вкладка сохранила эту базу. Твои изменения могут перезаписать их.
-          <button onClick={() => saveNow(dbRef.current)}>Сохранить мои</button>
+          <button onClick={() => saveNow()}>Сохранить мои</button>
           <button onClick={() => { setConflictWarning(false); window.location.reload(); }}>Загрузить свежие</button>
           <button onClick={() => setConflictWarning(false)}>✕</button>
         </div>
