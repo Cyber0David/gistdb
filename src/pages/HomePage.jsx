@@ -1,59 +1,63 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listGists, createGist, deleteGist, emptyDB } from '../api/gist';
+import { listUserGists, registerGist, unregisterGist } from '../api/server';
 import { useAuth } from '../hooks/useAuth';
 import ImportModal from '../components/ImportModal';
+import AdminLoginModal from '../components/AdminLoginModal';
+import RateLimitBanner from '../components/RateLimitBanner';
 
 export default function HomePage() {
-  const { token, setToken, isAdmin } = useAuth();
+  const { adminToken, setAdminToken, isAdmin, logoutAdmin, isUser, userSession, logoutUser, activeGitHubToken, encryptPassword } = useAuth();
   const navigate = useNavigate();
-  const [tokenInput, setTokenInput] = useState('');
+
   const [gists, setGists] = useState([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [openIdInput, setOpenIdInput] = useState('');
-  const [tokenError, setTokenError] = useState('');
   const [deletingId, setDeletingId] = useState(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => { if (isAdmin) loadGists(); }, [isAdmin]);
+  useEffect(() => {
+    if (isAdmin || isUser) loadGists();
+  }, [isAdmin, isUser]);
 
   async function loadGists() {
     setLoading(true);
-    try { setGists(await listGists(token)); } catch (e) { console.error(e); }
-    setLoading(false);
-  }
-
-  async function loginWithToken() {
-    if (!tokenInput.trim()) return;
-    setTokenError('');
     try {
-      const res = await fetch('https://api.github.com/user', {
-        headers: { Authorization: `Bearer ${tokenInput.trim()}`, Accept: 'application/vnd.github+json' },
-      });
-      if (!res.ok) { setTokenError('Неверный токен. Проверь права: Gists (read+write).'); return; }
-      setToken(tokenInput.trim());
-    } catch { setTokenError('Ошибка подключения к GitHub.'); }
+      if (isUser) {
+        // User: load from server registry (server knows which gists belong to this user)
+        const rows = await listUserGists(userSession.jwt);
+        setGists(rows.map(r => ({ id: r.gist_id, description: `GistDB: ${r.name}`, updatedAt: r.created_at })));
+      } else {
+        const list = await listGists(adminToken);
+        setGists(list);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
   }
 
   async function handleCreate() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const id = await createGist(token, emptyDB(newName.trim()));
+      const db = emptyDB(newName.trim());
+      const id = await createGist(activeGitHubToken, db, encryptPassword);
+      if (isUser) await registerGist(userSession.jwt, id, newName.trim());
       navigate(`/db/${id}`);
     } catch (e) { alert('Ошибка: ' + e.message); }
     setCreating(false);
   }
 
   async function handleImport(db) {
-    setShowImport(false);
-    setCreating(true);
+    setShowImport(false); setCreating(true);
     try {
-      const id = await createGist(token, db);
+      const id = await createGist(activeGitHubToken, db, encryptPassword);
+      if (isUser) await registerGist(userSession.jwt, id, db.name);
       navigate(`/db/${id}`);
     } catch (e) { alert('Ошибка импорта: ' + e.message); }
     setCreating(false);
@@ -61,10 +65,13 @@ export default function HomePage() {
 
   async function handleDelete(e, id) {
     e.stopPropagation();
-    if (!confirm('Удалить эту базу данных? Это действие нельзя отменить.')) return;
+    if (!confirm('Удалить эту базу данных?')) return;
     setDeletingId(id);
-    try { await deleteGist(token, id); setGists(g => g.filter(x => x.id !== id)); }
-    catch (e) { alert('Ошибка: ' + e.message); }
+    try {
+      await deleteGist(activeGitHubToken, id);
+      if (isUser) await unregisterGist(userSession.jwt, id);
+      setGists(g => g.filter(x => x.id !== id));
+    } catch (e) { alert('Ошибка: ' + e.message); }
     setDeletingId(null);
   }
 
@@ -76,12 +83,14 @@ export default function HomePage() {
     else alert('Неверный ID или ссылка');
   }
 
-  const filteredGists = gists.filter(g =>
-    (g.description || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredGists = gists.filter(g => (g.description || '').toLowerCase().includes(search.toLowerCase()));
+  const isLoggedIn = isAdmin || isUser;
+  const displayName = isAdmin ? 'Администратор' : userSession?.username;
 
   return (
     <div className="home-page">
+      <RateLimitBanner threshold={userSession?.threshold} />
+
       <div className="home-hero">
         <div className="hero-logo">⬡</div>
         <h1 className="hero-title">GistDB</h1>
@@ -89,6 +98,7 @@ export default function HomePage() {
       </div>
 
       <div className="home-content">
+        {/* Open by link */}
         <section className="home-section">
           <h2>Открыть по ссылке или ID</h2>
           <div className="input-row">
@@ -99,31 +109,31 @@ export default function HomePage() {
           </div>
         </section>
 
-        {!isAdmin && (
+        {/* Not logged in */}
+        {!isLoggedIn && (
           <section className="home-section">
-            <h2>Войти как администратор</h2>
-            <p className="section-hint">
-              Нужен GitHub Personal Access Token с правами <code>gist</code>.{' '}
-              <a href="https://github.com/settings/tokens/new?scopes=gist&description=GistDB" target="_blank" rel="noreferrer">Создать токен →</a>
-            </p>
-            <div className="input-row">
-              <input type="password" placeholder="ghp_xxxxxxxxxxxx"
-                value={tokenInput} onChange={e => setTokenInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && loginWithToken()} />
-              <button className="btn-primary" onClick={loginWithToken}>Войти</button>
+            <h2>Войти или зарегистрироваться</h2>
+            <p className="section-hint">Создай аккаунт чтобы хранить свои базы данных. Или войди как администратор с GitHub PAT-токеном.</p>
+            <div className="login-buttons">
+              <button className="btn-primary" onClick={() => navigate('/auth')}>Войти / Регистрация</button>
+              <button className="btn-ghost" onClick={() => setShowAdminLogin(true)}>🔑 Войти как админ</button>
             </div>
-            {tokenError && <p className="field-error">{tokenError}</p>}
           </section>
         )}
 
-        {isAdmin && (
-          <section className="home-section admin-section">
+        {/* Logged in panel */}
+        {isLoggedIn && (
+          <section className={`home-section ${isUser ? 'user-section' : 'admin-section'}`}>
             <div className="section-head">
-              <h2>Мои базы данных</h2>
+              <div>
+                <h2>Мои базы данных</h2>
+                <span className="section-user-badge">{isUser ? '👤' : '🔑'} {displayName}</span>
+              </div>
               <div className="section-head-right">
                 <button className="btn-primary" onClick={() => setShowCreate(v => !v)}>+ Создать</button>
                 <button className="btn-secondary" onClick={() => setShowImport(true)}>⬆ Импорт</button>
-                <button className="btn-ghost" onClick={() => { setToken(''); setGists([]); }}>Выйти</button>
+                {isUser && <button className="btn-ghost" onClick={() => navigate('/settings')}>⚙</button>}
+                <button className="btn-ghost" onClick={isAdmin ? logoutAdmin : logoutUser}>Выйти</button>
               </div>
             </div>
 
@@ -132,17 +142,14 @@ export default function HomePage() {
                 <input autoFocus placeholder="Название новой базы" value={newName}
                   onChange={e => setNewName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleCreate()} />
-                <button className="btn-primary" onClick={handleCreate} disabled={creating}>
-                  {creating ? 'Создаём...' : 'Создать'}
-                </button>
+                <button className="btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Создаём...' : 'Создать'}</button>
                 <button className="btn-ghost" onClick={() => setShowCreate(false)}>Отмена</button>
               </div>
             )}
 
             {gists.length > 3 && (
               <div className="gist-search-wrap">
-                <input className="gist-search" placeholder="Поиск по базам..."
-                  value={search} onChange={e => setSearch(e.target.value)} />
+                <input className="gist-search" placeholder="Поиск по базам..." value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             )}
 
@@ -154,12 +161,11 @@ export default function HomePage() {
                     {filteredGists.map(g => (
                       <div key={g.id} className="gist-card" onClick={() => navigate(`/db/${g.id}`)}>
                         <div className="gist-card-body">
-                          <div className="gist-card-name">{g.description?.replace('GistDB: ', '') || 'Без названия'}</div>
+                          <div className="gist-card-name">{g.description?.replace('GistDB: ', '') || 'Без названия'}{isUser && <span className="encrypted-badge">🔒 зашифровано</span>}</div>
                           <div className="gist-card-meta">Изменено: {new Date(g.updatedAt).toLocaleString('ru')}</div>
                           <div className="gist-card-id">{g.id.slice(0, 20)}…</div>
                         </div>
-                        <button className="gist-delete-btn" onClick={e => handleDelete(e, g.id)}
-                          disabled={deletingId === g.id} title="Удалить базу">
+                        <button className="gist-delete-btn" onClick={e => handleDelete(e, g.id)} disabled={deletingId === g.id}>
                           {deletingId === g.id ? '...' : '🗑'}
                         </button>
                       </div>
@@ -171,6 +177,7 @@ export default function HomePage() {
       </div>
 
       {showImport && <ImportModal onImport={handleImport} onClose={() => setShowImport(false)} />}
+      {showAdminLogin && <AdminLoginModal onClose={() => setShowAdminLogin(false)} onLogin={token => { setAdminToken(token); setShowAdminLogin(false); }} />}
     </div>
   );
 }
