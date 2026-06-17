@@ -1,4 +1,4 @@
-import { encryptData, decryptData } from './crypto.js';
+import { encryptData, decryptData, isEncrypted } from './crypto.js';
 
 const BASE = 'https://api.github.com';
 
@@ -35,18 +35,32 @@ export async function getGist(id, token, decryptPassword = null) {
   const content = data.files['db.json']?.content;
   if (!content) throw new Error('Invalid GistDB format');
 
+  const looksEncrypted = isEncrypted(content);
   let parsed;
-  if (decryptPassword) {
+  let plaintextLeak = false;
+
+  if (decryptPassword && looksEncrypted) {
     try {
       const plaintext = await decryptData(content, decryptPassword);
       parsed = JSON.parse(plaintext);
     } catch {
       throw new Error('Не удалось расшифровать. Неверный пароль?');
     }
+  } else if (decryptPassword && !looksEncrypted) {
+    // We have a password but the stored content is plain JSON, not encrypted.
+    // This happens if a previous save lost the encryption password (e.g. page reload)
+    // and silently wrote plaintext. Load it anyway, but flag it so the caller can
+    // warn the user and re-encrypt on next save instead of staying silently exposed.
+    parsed = JSON.parse(content);
+    plaintextLeak = true;
+  } else if (!decryptPassword && looksEncrypted) {
+    // Content is encrypted but we have no password to decrypt it — don't attempt
+    // JSON.parse on ciphertext (gives a confusing SyntaxError), fail clearly instead.
+    throw new Error('Эта база зашифрована. Нужен пароль владельца, чтобы её открыть.');
   } else {
     parsed = JSON.parse(content);
   }
-  return { ...parsed, gistId: id, updatedAt: data.updated_at };
+  return { ...parsed, gistId: id, updatedAt: data.updated_at, _plaintextLeak: plaintextLeak };
 }
 
 export async function createGist(token, db, encryptPassword = null) {
