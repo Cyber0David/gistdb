@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { hashPassword, isHashed } from '../api/password';
+import { hashPassword } from '../api/password';
 
 export default function DBSettings({ db, onSave, onClose }) {
   const [name, setName] = useState(db.name);
@@ -11,7 +11,7 @@ export default function DBSettings({ db, onSave, onClose }) {
   async function save() {
     if (!name.trim()) return;
     setSaving(true);
-    let passwordHash = db.password; // keep existing hash by default
+    let passwordHash;
 
     if (newPassword === '') {
       // Field left empty = keep existing password unchanged
