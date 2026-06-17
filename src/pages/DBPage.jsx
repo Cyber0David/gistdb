@@ -15,6 +15,7 @@ export default function DBPage() {
   const { id } = useParams();
   const { activeGitHubToken: token, isAdmin, isUser, encryptPassword, userSession } = useAuth();
   const navigate = useNavigate();
+  const canEdit = isAdmin || isUser;
 
   const { state: db, set: setDb, undo, redo, canUndo, canRedo } = useHistory(null);
   const [activeSheetId, setActiveSheetId] = useState(null);
@@ -48,6 +49,12 @@ export default function DBPage() {
         setDbNameVal(data.name);
         const alreadyUnlocked = sessionStorage.getItem(SESSION_KEY) === '1';
         if (!data.password || isAdmin || alreadyUnlocked) setUnlocked(true);
+        if (data._plaintextLeak && encryptPassword) {
+          // We had a password and found unencrypted content — a previous save likely
+          // lost the encryption key. Mark dirty so the very next autosave re-encrypts it.
+          setDirty(true);
+          alert('Внимание: эта база была сохранена без шифрования (вероятно, из-за истёкшей сессии). Она будет зашифрована заново при следующем сохранении.');
+        }
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -62,11 +69,11 @@ export default function DBPage() {
 
   // Conflict detection across tabs
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     const channel = new BroadcastChannel(`gistdb_${id}`);
     channel.onmessage = (e) => { if (e.data === 'saved' && dirty) setConflictWarning(true); };
     return () => channel.close();
-  }, [id, isAdmin, dirty]);
+  }, [id, canEdit, dirty]);
 
   // Ctrl+S, Ctrl+Z, Ctrl+Y
   useEffect(() => {
@@ -99,7 +106,14 @@ export default function DBPage() {
 
   async function saveNow(overrideDb) {
     const target = overrideDb || dbRef.current;
-    if (!target || !isAdmin || !token) return;
+    if (!target || !canEdit || !token) return;
+    // Safety: if this DB was created with encryption but we no longer have the password
+    // in memory (e.g. page was reloaded or opened via direct link), refuse to silently
+    // save in plaintext — that would strip encryption from an already-encrypted DB.
+    if (isUser && !encryptPassword) {
+      alert('Сессия истекла — пароль для шифрования недоступен. Перезайди в аккаунт, чтобы продолжить редактирование этой базы.');
+      return;
+    }
     const json = JSON.stringify(target);
     if (json === lastSavedJson.current) return;
     clearTimeout(saveTimer.current);
@@ -115,7 +129,7 @@ export default function DBPage() {
   }
 
   function scheduleSave(newDb) {
-    if (!isAdmin || !token) return;
+    if (!canEdit || !token) return;
     clearTimeout(saveTimer.current);
     setDirty(true); setSaved(false);
     saveTimer.current = setTimeout(() => saveNow(newDb), 5000);
@@ -159,7 +173,7 @@ export default function DBPage() {
   const mobileMenuItems = [
     { icon: '🔗', label: copied ? '✓ Скопировано!' : 'Поделиться', onClick: copyLink },
     ...(activeSheet ? [{ icon: '⬇', label: 'Экспорт...', onClick: () => setShowExport(true) }] : []),
-    ...(isAdmin ? [
+    ...(canEdit ? [
       'divider',
       { icon: '↩', label: 'Отменить (Ctrl+Z)', onClick: handleUndo },
       { icon: '↪', label: 'Повторить (Ctrl+Y)', onClick: handleRedo },
@@ -184,44 +198,44 @@ export default function DBPage() {
       <header className="db-header">
         <div className="db-header-left">
           <button className="back-btn" onClick={() => navigate('/')} title="На главную">←</button>
-          {isAdmin && editingName
+          {canEdit && editingName
             ? <input autoFocus className="db-name-input" value={dbNameVal}
                 onChange={e => setDbNameVal(e.target.value)}
                 onBlur={() => renameDB(dbNameVal)}
                 onKeyDown={e => { if (e.key === 'Enter') renameDB(dbNameVal); if (e.key === 'Escape') setEditingName(false); }} />
-            : <h1 className="db-name" onDoubleClick={isAdmin ? () => setEditingName(true) : undefined}>
+            : <h1 className="db-name" onDoubleClick={canEdit ? () => setEditingName(true) : undefined}>
                 {db.name}{db.password && <span className="lock-icon">🔒</span>}
               </h1>
           }
         </div>
 
         <div className="db-header-right desktop-only">
-          {isAdmin && canUndo() && <button className="btn-icon" onClick={handleUndo} title="Отменить (Ctrl+Z)">↩</button>}
-          {isAdmin && canRedo() && <button className="btn-icon" onClick={handleRedo} title="Повторить (Ctrl+Y)">↪</button>}
-          {isAdmin && <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : dirty ? 'dirty' : ''}`}>{saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : dirty ? '● Есть изменения' : ''}</span>}
-          {isAdmin && dirty && !saving && <button className="btn-save-now" onClick={() => saveNow()} title="Ctrl+S">💾 Сохранить</button>}
+          {canEdit && canUndo() && <button className="btn-icon" onClick={handleUndo} title="Отменить (Ctrl+Z)">↩</button>}
+          {canEdit && canRedo() && <button className="btn-icon" onClick={handleRedo} title="Повторить (Ctrl+Y)">↪</button>}
+          {canEdit && <span className={`save-status ${saving ? 'saving' : saved ? 'saved' : dirty ? 'dirty' : ''}`}>{saving ? 'Сохраняем...' : saved ? '✓ Сохранено' : dirty ? '● Есть изменения' : ''}</span>}
+          {canEdit && dirty && !saving && <button className="btn-save-now" onClick={() => saveNow()} title="Ctrl+S">💾 Сохранить</button>}
           {activeSheet && <ExportMenu sheet={activeSheet} dbName={db.name} />}
-          {isAdmin && <button className="btn-secondary" onClick={() => setShowSettings(true)}>⚙ Настройки</button>}
+          {canEdit && <button className="btn-secondary" onClick={() => setShowSettings(true)}>⚙ Настройки</button>}
           <button className="btn-secondary" onClick={copyLink}>{copied ? '✓ Скопировано!' : '🔗 Поделиться'}</button>
-          {!isAdmin && <span className="readonly-badge">Просмотр</span>}
+          {!canEdit && <span className="readonly-badge">Просмотр</span>}
         </div>
 
         <div className="db-header-right mobile-only">
-          {isAdmin && saving && <span className="save-status saving">Сохр...</span>}
-          {isAdmin && saved && <span className="save-status saved">✓</span>}
-          {isAdmin && dirty && !saving && <span className="save-status dirty">●</span>}
-          {!isAdmin && <span className="readonly-badge">Просмотр</span>}
+          {canEdit && saving && <span className="save-status saving">Сохр...</span>}
+          {canEdit && saved && <span className="save-status saved">✓</span>}
+          {canEdit && dirty && !saving && <span className="save-status dirty">●</span>}
+          {!canEdit && <span className="readonly-badge">Просмотр</span>}
           <MobileMenu items={mobileMenuItems} />
         </div>
       </header>
 
       <SheetTabs
-        sheets={db.sheets} activeId={activeSheetId} isAdmin={isAdmin}
+        sheets={db.sheets} activeId={activeSheetId} isAdmin={canEdit}
         onSelect={setActiveSheetId} onAdd={addSheet} onRename={renameSheet}
         onDelete={deleteSheet} onDuplicate={duplicateSheet} onReorder={reorderSheets}
       />
 
-      {activeSheet && <Sheet sheet={activeSheet} isAdmin={isAdmin} onChange={updateSheet} />}
+      {activeSheet && <Sheet sheet={activeSheet} isAdmin={canEdit} onChange={updateSheet} />}
 
       {showSettings && <DBSettings db={db} onSave={saveSettings} onClose={() => setShowSettings(false)} />}
 
