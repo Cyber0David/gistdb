@@ -1,13 +1,18 @@
-const SERVER = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+const SERVER = (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 function authHeaders(token) {
-  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 async function req(method, path, body, token) {
   const res = await fetch(`${SERVER}${path}`, {
-    method, headers: authHeaders(token),
+    method,
+    headers: authHeaders(token),
     body: body ? JSON.stringify(body) : undefined,
+    credentials: 'include',
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
