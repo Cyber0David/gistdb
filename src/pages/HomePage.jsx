@@ -22,10 +22,6 @@ export default function HomePage() {
   const [deletingId, setDeletingId] = useState(null);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (isAdmin || isUser) loadGists();
-  }, [isAdmin, isUser]);
-
   async function loadGists() {
     setLoading(true);
     try {
@@ -40,6 +36,11 @@ export default function HomePage() {
     } catch (e) { console.error(e); }
     setLoading(false);
   }
+
+  useEffect(() => {
+    if (isAdmin || isUser) loadGists();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, isUser]);
 
   async function handleCreate() {
     if (!newName.trim()) return;
