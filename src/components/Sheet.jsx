@@ -29,13 +29,8 @@ function evalCell(val, rows) {
       if (fn === 'MIN') return String(Math.min(...vals));
       if (fn === 'MAX') return String(Math.max(...vals));
     }
-  } catch {}
+  } catch { /* malformed formula — fall back to showing raw text */ }
   return val;
-}
-
-function parseCellStyle(raw) {
-  if (!raw) return {};
-  try { return JSON.parse(raw); } catch { return {}; }
 }
 
 const COLORS = ['', '#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#ffffff','#94a3b8'];
@@ -84,7 +79,6 @@ export default function Sheet({ sheet, isAdmin, onChange }) {
     return { r1: Math.min(s.r1,s.r2), r2: Math.max(s.r1,s.r2), c1: Math.min(s.c1,s.c2), c2: Math.max(s.c1,s.c2) };
   }
   function inSel(r, c) { const s = normSel(selection); return s && r>=s.r1&&r<=s.r2&&c>=s.c1&&c<=s.c2; }
-  function isActive(r, c) { return activeCell?.r===r && activeCell?.c===c; }
 
   // ── KEYBOARD NAV ──────────────────────────────────────────────
   function handleCellKeyDown(e, r, c) {
