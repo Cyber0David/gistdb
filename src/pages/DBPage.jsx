@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGist, updateGist, getRateLimit } from '../api/gist';
+import { getGist, updateGist } from '../api/gist';
 import { useAuth } from '../hooks/useAuth';
 import { useHistory } from '../hooks/useHistory';
 import Sheet from '../components/Sheet';
@@ -9,10 +9,11 @@ import ExportMenu from '../components/ExportMenu';
 import PasswordModal from '../components/PasswordModal';
 import DBSettings from '../components/DBSettings';
 import MobileMenu from '../components/MobileMenu';
+import RateLimitBanner from '../components/RateLimitBanner';
 
 export default function DBPage() {
   const { id } = useParams();
-  const { activeGitHubToken: token, isAdmin, isUser, encryptPassword } = useAuth();
+  const { activeGitHubToken: token, isAdmin, isUser, encryptPassword, userSession } = useAuth();
   const navigate = useNavigate();
 
   const { state: db, set: setDb, undo, redo, canUndo, canRedo } = useHistory(null);
@@ -50,7 +51,7 @@ export default function DBPage() {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id, isAdmin]);
+  }, [id, isAdmin, token, encryptPassword, SESSION_KEY]);
 
   // Warn on close with unsaved changes
   useEffect(() => {
@@ -107,7 +108,7 @@ export default function DBPage() {
       await updateGist(token, id, target, encryptPassword);
       lastSavedJson.current = json;
       setDirty(false); setConflictWarning(false); setSaved(true);
-      try { new BroadcastChannel(`gistdb_${id}`).postMessage('saved'); } catch {}
+      try { new BroadcastChannel(`gistdb_${id}`).postMessage('saved'); } catch { /* BroadcastChannel unsupported — ignore */ }
       setTimeout(() => setSaved(false), 2000);
     } catch (e) { alert('Ошибка сохранения: ' + e.message); }
     setSaving(false);
@@ -170,7 +171,7 @@ export default function DBPage() {
 
   return (
     <div className="db-page">
-      <RateLimitBanner threshold={null} />
+      <RateLimitBanner threshold={isUser ? userSession?.threshold : null} />
       {conflictWarning && (
         <div className="conflict-banner">
           ⚠ Другая вкладка сохранила эту базу. Твои изменения могут перезаписать их.
