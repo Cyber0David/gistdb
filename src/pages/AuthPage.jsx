@@ -55,7 +55,7 @@ export default function AuthPage() {
         <div className="auth-fields">
           <div className="auth-field">
             <label>Логин</label>
-            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="minимум 3 символа" autoFocus
+            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="минимум 3 символа" autoFocus
               onKeyDown={e => e.key === 'Enter' && handleSubmit()} />
           </div>
 
