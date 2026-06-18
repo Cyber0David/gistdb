@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listGists, createGist, deleteGist, emptyDB } from '../api/gist';
-import { listUserGists, registerGist, unregisterGist } from '../api/server';
+import { listUserGists, registerGist, unregisterGist, getRegisteredGistIds } from '../api/server';
 import { useAuth } from '../hooks/useAuth';
 import ImportModal from '../components/ImportModal';
 import AdminLoginModal from '../components/AdminLoginModal';
@@ -31,7 +31,20 @@ export default function HomePage() {
         setGists(rows.map(r => ({ id: r.gist_id, description: `GistDB: ${r.name}`, updatedAt: r.created_at })));
       } else {
         const list = await listGists(adminToken);
-        setGists(list);
+        // Exclude any gist that's registered as belonging to a regular user —
+        // the admin panel should only ever show the admin's own databases.
+        // Bounded by a timeout so a slow/unreachable server can't hang the
+        // entire admin gist list; on any failure we fall back to showing
+        // everything rather than blocking the admin.
+        let excludeIds = [];
+        try {
+          excludeIds = await Promise.race([
+            getRegisteredGistIds(adminToken),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000)),
+          ]);
+        } catch { /* server unavailable or slow — show everything instead of blocking admin */ }
+        const excludeSet = new Set(excludeIds);
+        setGists(list.filter(g => !excludeSet.has(g.id)));
       }
     } catch (e) { console.error(e); }
     setLoading(false);
