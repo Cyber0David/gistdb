@@ -1,20 +1,34 @@
-const SERVER = (import.meta.env.VITE_SERVER_URL || 'http://localhost:3001').replace(/\/$/, '');
+const SERVER = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
 function authHeaders(token) {
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
+// Thrown when the server itself couldn't be reached (network failure, Railway
+// down, DNS issue, etc) — as opposed to the server responding normally with
+// an error (wrong password, invalid token, etc). Callers that need an offline
+// fallback (e.g. admin login) check for this specific error type.
+export class ServerUnreachableError extends Error {}
+
 async function req(method, path, body, token) {
-  const res = await fetch(`${SERVER}${path}`, {
-    method,
-    headers: authHeaders(token),
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'include',
-  });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(`${SERVER}${path}`, {
+      method, headers: authHeaders(token),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ServerUnreachableError('Сервер недоступен');
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    // Server responded but not with valid JSON (e.g. a 502 HTML error page
+    // from Railway's proxy when the upstream process isn't listening) —
+    // treat this the same as fully unreachable.
+    throw new ServerUnreachableError('Сервер недоступен');
+  }
   if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
   return data;
 }
@@ -56,4 +70,13 @@ export async function unregisterGist(token, gist_id) {
 
 export async function updateGistName(token, gist_id, name) {
   return req('PATCH', `/api/gists/${gist_id}/name`, { name }, token);
+}
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────────
+export async function verifyAdmin(pat) {
+  return req('POST', '/api/admin/verify', { pat });
+}
+
+export async function getRegisteredGistIds(adminToken) {
+  return req('GET', '/api/gists/registered-ids', null, adminToken);
 }
